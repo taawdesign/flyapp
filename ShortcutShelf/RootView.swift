@@ -25,14 +25,6 @@ enum LibrarySection: Hashable, Identifiable {
     case .category(let id): return "category:\(id)"
     }
   }
-
-  var title: String {
-    switch self {
-    case .all: return "All Shortcuts"
-    case .favorites: return "Favorites"
-    case .category: return "Category"
-    }
-  }
 }
 
 struct RootView: View {
@@ -137,9 +129,7 @@ struct RootView: View {
           ShortcutRow(
             shortcut: shortcut,
             isFavorite: isFavorite(shortcut.id),
-            toggleFavorite: {
-              setFavorite(shortcut.id, isFavorite: !isFavorite(shortcut.id))
-            }
+            toggleFavorite: { setFavorite(shortcut.id, isFavorite: !isFavorite(shortcut.id)) }
           )
           .tag(shortcut.id as ShortcutItem.ID?)
           .contextMenu {
@@ -151,10 +141,12 @@ struct RootView: View {
                let runURL = ShortcutLinkBuilder.link(for: name, kind: .run) {
               Button("Run") { openURL(runURL) }
             }
+
             if let name = shortcut.shortcutName,
                let openShortcutURL = ShortcutLinkBuilder.link(for: name, kind: .open) {
               Button("Open in Shortcuts") { openURL(openShortcutURL) }
             }
+
             if let installURL = shortcut.installURL {
               Button("Get Shortcut") { openURL(installURL) }
             }
@@ -286,6 +278,7 @@ private struct ShortcutDetailView: View {
       VStack(alignment: .leading, spacing: 6) {
         Text(shortcut.title)
           .font(.title2.weight(.semibold))
+
         if let subtitle = shortcut.subtitle, !subtitle.isEmpty {
           Text(subtitle)
             .font(.body)
@@ -349,7 +342,7 @@ private struct ShortcutDetailView: View {
           .buttonStyle(.bordered)
         }
 
-        if let shareURL = shortcut.installURL ?? (shortcut.shortcutName.flatMap { ShortcutLinkBuilder.link(for: $0, kind: .open) }) {
+        if let shareURL = shortcut.installURL ?? shortcut.shortcutName.flatMap({ ShortcutLinkBuilder.link(for: $0, kind: .open) }) {
           ShareLink(item: shareURL) {
             Label("Share", systemImage: "square.and.arrow.up")
           }
@@ -368,6 +361,7 @@ private struct ShortcutDetailView: View {
           Text(name).textSelection(.enabled)
         }
       }
+
       if let installURL = shortcut.installURL {
         LabeledContent("Install link") {
           Text(installURL.absoluteString)
