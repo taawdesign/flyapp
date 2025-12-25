@@ -620,14 +620,6 @@ struct ContentView: View {
             .padding(.horizontal, isPad ? 16 : 12)
             .frame(maxWidth: isPad ? 800 : .infinity)
         }
-        // MARK: - KEYBOARD DISMISSAL LOGIC (Fixed to not interfere with TextField)
-        .simultaneousGesture(
-            TapGesture()
-                .onEnded { _ in
-                    // Only dismiss keyboard if tapping outside the input area
-                    hideKeyboard()
-                }
-        )
         .sheet(isPresented: $viewModel.showSettings) { SettingsSheet(viewModel: viewModel).preferredColorScheme(.dark) }
         .sheet(isPresented: $viewModel.showHistory) { HistorySheet(viewModel: viewModel).preferredColorScheme(.dark) }
         
@@ -912,40 +904,25 @@ struct InputAreaView: View {
                     }.padding(.horizontal, 16).padding(.bottom, 8)
                 }
             }
-            HStack(spacing: 8) {
+            HStack(alignment: .bottom, spacing: 8) {
                 Menu {
                     Button { viewModel.showFileImporter = true } label: { Label("Files", systemImage: "doc") }
                     Button { viewModel.requestPhotoPermission() } label: { Label("Photo Library", systemImage: "photo") }
                 } label: { Image(systemName: "paperclip").font(.title3).foregroundStyle(.white.opacity(0.7)).frame(width: 40, height: 40).background(.white.opacity(0.1)).clipShape(Circle()) }
                 
-                // FIXED: TextField with proper external keyboard support
-                TextField("", text: $viewModel.inputText, axis: .vertical)
-                    .placeholder(when: viewModel.inputText.isEmpty) { 
-                        Text("Type a message...").foregroundStyle(.white.opacity(0.4)) 
-                    }
-                    .font(.body)
-                    .foregroundStyle(.white)
-                    .tint(.cyan)
-                    .padding(12)
-                    .background(Color.black.opacity(0.3))
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(.white.opacity(0.1), lineWidth: 1))
-                    .focused($isFocused)
-                    .lineLimit(1...5)
-                    .submitLabel(.send)
-                    .onSubmit {
-                        // Handle Enter/Return key press
+                // FIXED: Custom UITextView wrapper for external keyboard support
+                ExternalKeyboardTextField(
+                    text: $viewModel.inputText,
+                    placeholder: "Type a message...",
+                    onSubmit: {
                         if !viewModel.inputText.isEmpty || !viewModel.pendingAttachments.isEmpty {
                             Task { await viewModel.sendMessage() }
                         }
-                    }
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled(false)
-                    .textFieldStyle(.plain)
-                    .onTapGesture {
-                        // Ensure focus when tapped
-                        isFocused = true
-                    }
+                    },
+                    isFocused: $isFocused
+                )
+                .frame(minHeight: 40, maxHeight: 120)
+                .frame(maxWidth: .infinity)
                 
                 Button { 
                     Task { await viewModel.sendMessage() } 
@@ -965,7 +942,7 @@ struct InputAreaView: View {
             .premiumGlass(cornerRadius: isPad ? 40 : 32, intense: true)
             .onAppear {
                 // Auto-focus on appear for external keyboard support
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     isFocused = true
                 }
             }
@@ -1048,6 +1025,164 @@ struct PremiumBackground: View {
 struct TypingIndicator: View { @State private var p1 = false; @State private var p2 = false; @State private var p3 = false; var body: some View { HStack(spacing: 4) { dot(p1); dot(p2); dot(p3) }.padding(12).background(.ultraThinMaterial).clipShape(Capsule()).onAppear { withAnimation(.easeInOut(duration: 0.5).repeatForever().delay(0.0)) { p1.toggle() }; withAnimation(.easeInOut(duration: 0.5).repeatForever().delay(0.2)) { p2.toggle() }; withAnimation(.easeInOut(duration: 0.5).repeatForever().delay(0.4)) { p3.toggle() } } }
     func dot(_ active: Bool) -> some View { Circle().fill(active ? Color.white : Color.white.opacity(0.3)).frame(width: 6, height: 6) } }
 extension View { func placeholder<Content: View>(when shouldShow: Bool, alignment: Alignment = .leading, @ViewBuilder placeholder: () -> Content) -> some View { ZStack(alignment: alignment) { placeholder().opacity(shouldShow ? 1 : 0); self } } }
+
+// MARK: - Custom Text Input for External Keyboard Support
+struct ExternalKeyboardTextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var onSubmit: () -> Void
+    @FocusState.Binding var isFocused: Bool
+    
+    func makeUIView(context: Context) -> UITextViewWrapper {
+        let wrapper = UITextViewWrapper()
+        context.coordinator.wrapper = wrapper
+        wrapper.textView.delegate = context.coordinator
+        wrapper.textView.font = UIFont.systemFont(ofSize: 17)
+        wrapper.textView.textColor = .white
+        wrapper.textView.backgroundColor = .clear
+        wrapper.textView.tintColor = .cyan
+        wrapper.textView.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        wrapper.textView.textContainer.lineFragmentPadding = 0
+        wrapper.textView.isScrollEnabled = true
+        wrapper.textView.returnKeyType = .send
+        wrapper.textView.enablesReturnKeyAutomatically = false
+        wrapper.textView.autocapitalizationType = .none
+        wrapper.textView.autocorrectionType = .yes
+        wrapper.textView.keyboardType = .default
+        wrapper.textView.keyboardAppearance = .dark
+        wrapper.placeholder = placeholder
+        wrapper.placeholderColor = UIColor.white.withAlphaComponent(0.4)
+        wrapper.updatePlaceholder()
+        return wrapper
+    }
+    
+    func updateUIView(_ wrapper: UITextViewWrapper, context: Context) {
+        context.coordinator.wrapper = wrapper
+        if wrapper.textView.text != text {
+            wrapper.textView.text = text
+            wrapper.updatePlaceholder()
+        }
+        
+        wrapper.placeholder = placeholder
+        
+        // Handle focus
+        if isFocused && !wrapper.textView.isFirstResponder {
+            DispatchQueue.main.async {
+                wrapper.textView.becomeFirstResponder()
+            }
+        } else if !isFocused && wrapper.textView.isFirstResponder {
+            DispatchQueue.main.async {
+                wrapper.textView.resignFirstResponder()
+            }
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextViewDelegate {
+        var parent: ExternalKeyboardTextField
+        weak var wrapper: UITextViewWrapper?
+        
+        init(_ parent: ExternalKeyboardTextField) {
+            self.parent = parent
+        }
+        
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+            wrapper?.updatePlaceholder()
+        }
+        
+        func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
+            if text == "\n" {
+                parent.onSubmit()
+                return false
+            }
+            return true
+        }
+        
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            DispatchQueue.main.async {
+                self.parent.isFocused = true
+            }
+            wrapper?.updatePlaceholder()
+        }
+        
+        func textViewDidEndEditing(_ textView: UITextView) {
+            DispatchQueue.main.async {
+                self.parent.isFocused = false
+            }
+            wrapper?.updatePlaceholder()
+        }
+    }
+}
+
+class UITextViewWrapper: UIView {
+    let textView = UITextView()
+    private let placeholderLabel = UILabel()
+    var placeholder: String = "" {
+        didSet {
+            placeholderLabel.text = placeholder
+        }
+    }
+    var placeholderColor: UIColor = .gray {
+        didSet {
+            placeholderLabel.textColor = placeholderColor
+        }
+    }
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setup()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setup()
+    }
+    
+    private func setup() {
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+        
+        addSubview(textView)
+        addSubview(placeholderLabel)
+        
+        NSLayoutConstraint.activate([
+            textView.topAnchor.constraint(equalTo: topAnchor),
+            textView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            textView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            textView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            placeholderLabel.topAnchor.constraint(equalTo: textView.topAnchor, constant: 12),
+            placeholderLabel.leadingAnchor.constraint(equalTo: textView.leadingAnchor, constant: 12),
+            placeholderLabel.trailingAnchor.constraint(equalTo: textView.trailingAnchor, constant: -12)
+        ])
+        
+        placeholderLabel.font = UIFont.systemFont(ofSize: 17)
+        placeholderLabel.textColor = placeholderColor
+        placeholderLabel.numberOfLines = 0
+        
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(textDidChange),
+            name: UITextView.textDidChangeNotification,
+            object: textView
+        )
+    }
+    
+    @objc private func textDidChange() {
+        updatePlaceholder()
+    }
+    
+    func updatePlaceholder() {
+        placeholderLabel.isHidden = !textView.text.isEmpty
+    }
+    
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+}
 
 // MARK: - KEYBOARD HELPER EXTENSION
 #if canImport(UIKit)
