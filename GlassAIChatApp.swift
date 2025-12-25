@@ -9,6 +9,9 @@ import Photos
 struct GlassAIChatApp: App {
     init() {
         UITextView.appearance().backgroundColor = .clear
+        // Ensure text fields work with external keyboards
+        UITextField.appearance().keyboardAppearance = .dark
+        UITextView.appearance().keyboardAppearance = .dark
     }
     
     var body: some Scene {
@@ -990,11 +993,47 @@ struct ProviderEditSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("API Configuration") { SecureField("API Key", text: $provider.apiKey); if provider.name == "Custom" { TextField("Base URL", text: $provider.baseURL) } }
+                Section("API Configuration") {
+                    HStack {
+                        Text("API Key").frame(width: 100, alignment: .leading)
+                        ExternalKeyboardUITextField(
+                            text: $provider.apiKey,
+                            placeholder: "Enter API Key",
+                            isSecure: true,
+                            keyboardType: .default,
+                            autocapitalizationType: .none,
+                            autocorrectionType: .no
+                        )
+                    }
+                    
+                    if provider.name == "Custom" {
+                        HStack {
+                            Text("Base URL").frame(width: 100, alignment: .leading)
+                            ExternalKeyboardUITextField(
+                                text: $provider.baseURL,
+                                placeholder: "https://api.example.com",
+                                keyboardType: .URL,
+                                autocapitalizationType: .none,
+                                autocorrectionType: .no
+                            )
+                        }
+                    }
+                }
                 Section("Model") {
                     HStack { Button(isFetching ? "Fetching..." : "Load Models") { Task { await fetchModels() } }.disabled(provider.apiKey.isEmpty || isFetching).foregroundStyle(.cyan); if isFetching { ProgressView().padding(.leading) } }
                     if let err = errorMsg { Text(err).foregroundStyle(.red).font(.caption) }
-                    if !availableModels.isEmpty { Picker("Select Model", selection: $provider.model) { Text("Select...").tag(""); ForEach(availableModels, id: \.self) { m in Text(m).tag(m) } } } else { TextField("Manual Model ID", text: $provider.model) }
+                    if !availableModels.isEmpty { Picker("Select Model", selection: $provider.model) { Text("Select...").tag(""); ForEach(availableModels, id: \.self) { m in Text(m).tag(m) } } } else {
+                        HStack {
+                            Text("Model ID").frame(width: 100, alignment: .leading)
+                            ExternalKeyboardUITextField(
+                                text: $provider.model,
+                                placeholder: "Enter Model ID",
+                                keyboardType: .default,
+                                autocapitalizationType: .none,
+                                autocorrectionType: .no
+                            )
+                        }
+                    }
                 }
             }
             .navigationTitle("Edit \(provider.name)").toolbar { ToolbarItem(placement: .confirmationAction) { Button("Save") { provider.knownModels = availableModels; onSave(provider); dismiss() } } }
@@ -1026,7 +1065,92 @@ struct TypingIndicator: View { @State private var p1 = false; @State private var
     func dot(_ active: Bool) -> some View { Circle().fill(active ? Color.white : Color.white.opacity(0.3)).frame(width: 6, height: 6) } }
 extension View { func placeholder<Content: View>(when shouldShow: Bool, alignment: Alignment = .leading, @ViewBuilder placeholder: () -> Content) -> some View { ZStack(alignment: alignment) { placeholder().opacity(shouldShow ? 1 : 0); self } } }
 
-// MARK: - Custom Text Input for External Keyboard Support
+// MARK: - Custom Text Input Components for External Keyboard Support
+
+// UITextField wrapper for single-line text input
+struct ExternalKeyboardUITextField: UIViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var isSecure: Bool = false
+    var keyboardType: UIKeyboardType = .default
+    var autocapitalizationType: UITextAutocapitalizationType = .none
+    var autocorrectionType: UITextAutocorrectionType = .yes
+    var returnKeyType: UIReturnKeyType = .default
+    var onSubmit: (() -> Void)? = nil
+    
+    func makeUIView(context: Context) -> UITextField {
+        let textField = UITextField()
+        textField.delegate = context.coordinator
+        textField.font = UIFont.systemFont(ofSize: 17)
+        textField.textColor = .label
+        textField.text = text
+        textField.placeholder = placeholder
+        textField.isSecureTextEntry = isSecure
+        textField.keyboardType = keyboardType
+        textField.autocapitalizationType = autocapitalizationType
+        textField.autocorrectionType = autocorrectionType
+        textField.returnKeyType = returnKeyType
+        textField.enablesReturnKeyAutomatically = false
+        
+        // Critical for external keyboard support
+        textField.keyboardAppearance = .dark
+        textField.clearButtonMode = .whileEditing
+        
+        // Add target for text changes (works better with external keyboards)
+        textField.addTarget(context.coordinator, action: #selector(Coordinator.textFieldDidChange(_:)), for: .editingChanged)
+        
+        return textField
+    }
+    
+    func updateUIView(_ textField: UITextField, context: Context) {
+        // Only update text if it changed externally and text field is not being edited
+        if !textField.isFirstResponder && textField.text != text {
+            textField.text = text
+        }
+        textField.placeholder = placeholder
+        textField.isSecureTextEntry = isSecure
+        textField.keyboardType = keyboardType
+        textField.autocapitalizationType = autocapitalizationType
+        textField.autocorrectionType = autocorrectionType
+        textField.returnKeyType = returnKeyType
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, UITextFieldDelegate {
+        var parent: ExternalKeyboardUITextField
+        
+        init(_ parent: ExternalKeyboardUITextField) {
+            self.parent = parent
+        }
+        
+        @objc func textFieldDidChange(_ textField: UITextField) {
+            // Update binding from text field changes
+            DispatchQueue.main.async {
+                self.parent.text = textField.text ?? ""
+            }
+        }
+        
+        func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+            // Always allow the change - textFieldDidChange will update the binding
+            return true
+        }
+        
+        func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+            parent.onSubmit?()
+            textField.resignFirstResponder()
+            return true
+        }
+        
+        func textFieldDidBeginEditing(_ textField: UITextField) {
+            // Text field is ready for input
+        }
+    }
+}
+
+// UITextView wrapper for multi-line text input
 struct ExternalKeyboardTextField: UIViewRepresentable {
     @Binding var text: String
     var placeholder: String
@@ -1053,6 +1177,7 @@ struct ExternalKeyboardTextField: UIViewRepresentable {
         wrapper.placeholder = placeholder
         wrapper.placeholderColor = UIColor.white.withAlphaComponent(0.4)
         wrapper.updatePlaceholder()
+        
         return wrapper
     }
     
