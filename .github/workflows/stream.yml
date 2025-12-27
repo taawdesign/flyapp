@@ -11,15 +11,13 @@ jobs:
         uses: actions/checkout@v4
 
       # --- DEBUG STEP START ---
-      # This will list all files so we can see where your project is hiding
       - name: List Files (Debug)
         run: |
           echo "📂 Listing all files in the repository:"
           ls -R
       # --- DEBUG STEP END ---
       
-      # STEP 1: Build for Simulator
-      # I added a search command to try and find your project automatically
+      # STEP 1: Build for Simulator (UPDATED FOR IPHONE 16)
       - name: Build for Simulator
         run: |
           # Find the directory containing the project file
@@ -36,15 +34,13 @@ jobs:
           xcodebuild build \
             -scheme "SwiftIDE" \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             -configuration Debug \
             -derivedDataPath build
 
       # STEP 2: Zip the Build
       - name: Zip the Build
         run: |
-          # We need to find where the build output went, regardless of project location
-          # Using 'find' to locate the .app bundle is safer
           APP_PATH=$(find . -name "*.app" -type d | grep "Debug-iphonesimulator" | head -n 1)
           
           if [ -z "$APP_PATH" ]; then
@@ -56,7 +52,6 @@ jobs:
           cd "$(dirname "$APP_PATH")"
           zip -r app_build.zip "$(basename "$APP_PATH")"
           
-          # Move zip back to root for the upload step
           mv app_build.zip $GITHUB_WORKSPACE/app_build.zip
 
       # STEP 3: Upload to Appetize
