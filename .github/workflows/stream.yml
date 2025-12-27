@@ -13,17 +13,13 @@ jobs:
       # STEP 1: Build for Simulator
       - name: Build for Simulator
         run: |
-          # Find the project directory
           PROJECT_PATH=$(find . -name "*.xcodeproj" -o -name "Package.swift" | head -n 1 | xargs dirname)
-          
           if [ -z "$PROJECT_PATH" ]; then
             echo "❌ ERROR: No Xcode project or Package.swift found!"
             exit 1
           fi
-          
           cd "$PROJECT_PATH"
 
-          # Build the Scheme "SwiftIDE" for iPhone 16
           xcodebuild build \
             -scheme "SwiftIDE" \
             -sdk iphonesimulator \
@@ -34,21 +30,17 @@ jobs:
       # STEP 2: Package and Zip
       - name: Package and Zip
         run: |
-          # Find the raw executable
           BINARY_PATH=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -type f -name "SwiftIDE" | head -n 1)
-          
           if [ -z "$BINARY_PATH" ]; then
              echo "❌ ERROR: Could not find raw executable 'SwiftIDE'"
              exit 1
           fi
 
-          # Create .app structure
           APP_NAME="SwiftIDE"
           APP_DIR="$APP_NAME.app"
           mkdir -p "$APP_DIR"
           cp "$BINARY_PATH" "$APP_DIR/$APP_NAME"
           
-          # Create Info.plist
           cat > "$APP_DIR/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -72,25 +64,36 @@ jobs:
           </plist>
           EOF
           
-          # Zip it
           zip -r app_build.zip "$APP_DIR"
           mv app_build.zip $GITHUB_WORKSPACE/app_build.zip
 
-      # STEP 3: Upload to Appetize (FIXED)
+      # STEP 3: Upload to Appetize (AUTHENTICATION FIXED)
       - name: Upload to Streaming Server
         id: upload_step
         run: |
-          # We removed the conflicting --data-raw command.
-          # We now use -F (Form Data) for everything, which is what Appetize expects for files.
+          # We use -u to handle the Basic Auth automatically with your raw token
+          # We also remove -s so we can see errors if they happen
           
-          response=$(curl -s https://api.appetize.io/v1/apps \
-            -H "Authorization: Basic ${{ secrets.APPETIZE_TOKEN }}" \
+          echo "🚀 Uploading to Appetize..."
+          
+          response=$(curl -v -u "${{ secrets.APPETIZE_TOKEN }}:" https://api.appetize.io/v1/apps \
             -F "file=@app_build.zip" \
             -F "platform=ios" \
             -F "fileType=zip")
             
-          echo "Upload complete!"
           echo "------------------------------------------------"
-          echo "LOOK BELOW FOR YOUR PUBLIC KEY:"
-          echo $response | grep -o '"publicKey":"[^"]*"'
+          echo "FULL SERVER RESPONSE:"
+          echo "$response"
           echo "------------------------------------------------"
+          
+          # We use || true so the script doesn't crash if grep fails
+          key=$(echo "$response" | grep -o '"publicKey":"[^"]*"' | cut -d'"' -f4)
+          
+          if [ -z "$key" ]; then
+            echo "❌ ERROR: No publicKey found in response. Check the logs above for the error message."
+            exit 1
+          else
+            echo "✅ SUCCESS!"
+            echo "YOUR PUBLIC KEY IS: $key"
+            echo "Copy this key into your iPad App."
+          fi
