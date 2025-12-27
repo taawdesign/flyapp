@@ -4,44 +4,72 @@ on: workflow_dispatch
 
 jobs:
   build-and-stream:
-    runs-on: macos-latest  # <--- CHANGED THIS LINE
+    runs-on: macos-latest
     
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4 # Updated to v4 for better compatibility
+        uses: actions/checkout@v4
+
+      # --- DEBUG STEP START ---
+      # This will list all files so we can see where your project is hiding
+      - name: List Files (Debug)
+        run: |
+          echo "📂 Listing all files in the repository:"
+          ls -R
+      # --- DEBUG STEP END ---
       
-      # STEP 1: Build specifically for the Simulator architecture
-      # REMEMBER: Change 'SwiftIDE' below to your actual scheme name if it's different!
+      # STEP 1: Build for Simulator
+      # I added a search command to try and find your project automatically
       - name: Build for Simulator
         run: |
+          # Find the directory containing the project file
+          PROJECT_PATH=$(find . -name "*.xcodeproj" -o -name "Package.swift" | head -n 1 | xargs dirname)
+          
+          if [ -z "$PROJECT_PATH" ]; then
+            echo "❌ ERROR: No Xcode project or Package.swift found!"
+            exit 1
+          fi
+          
+          echo "✅ Found project in: $PROJECT_PATH"
+          cd "$PROJECT_PATH"
+
           xcodebuild build \
             -scheme "SwiftIDE" \
             -sdk iphonesimulator \
             -destination 'platform=iOS Simulator,name=iPhone 15' \
             -configuration Debug \
             -derivedDataPath build
-            
-      # STEP 2: Zip the App Bundle
+
+      # STEP 2: Zip the Build
       - name: Zip the Build
         run: |
-          cd build/Build/Products/Debug-iphonesimulator/
-          zip -r app_build.zip *.app
+          # We need to find where the build output went, regardless of project location
+          # Using 'find' to locate the .app bundle is safer
+          APP_PATH=$(find . -name "*.app" -type d | grep "Debug-iphonesimulator" | head -n 1)
           
-      # STEP 3: Upload to Appetize.io
+          if [ -z "$APP_PATH" ]; then
+             echo "❌ ERROR: Could not find built .app bundle"
+             exit 1
+          fi
+
+          echo "📦 Zipping app at: $APP_PATH"
+          cd "$(dirname "$APP_PATH")"
+          zip -r app_build.zip "$(basename "$APP_PATH")"
+          
+          # Move zip back to root for the upload step
+          mv app_build.zip $GITHUB_WORKSPACE/app_build.zip
+
+      # STEP 3: Upload to Appetize
       - name: Upload to Streaming Server
         id: upload_step
         run: |
-          # The -F "file=@..." flag sends the zip file
-          # The response captures the JSON output from Appetize
           response=$(curl --request POST https://api.appetize.io/v1/apps \
             --header "Authorization: Basic ${{ secrets.APPETIZE_TOKEN }}" \
             --header 'Content-Type: application/json' \
             --data-raw '{ "platform": "ios", "fileType": "zip" }' \
-            -F "file=@build/Build/Products/Debug-iphonesimulator/app_build.zip")
+            -F "file=@app_build.zip")
             
           echo "Upload complete!"
-          
-          # This helps you find the key in the logs
           echo "------------------------------------------------"
           echo "LOOK BELOW FOR YOUR PUBLIC KEY:"
           echo $response | grep -o '"publicKey":"[^"]*"'
