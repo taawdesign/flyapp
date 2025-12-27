@@ -1,756 +1,267 @@
 import SwiftUI
-import UIKit
-import AVFoundation
-import PDFKit
 import WebKit
-import Combine
 
-// MARK: - 1. FREE AI ENGINE (Pollinations.ai)
-// Features: Ad-Blocking, Auto-Save History, Swift 6 Concurrency.
-
-struct ChatMessage: Identifiable, Equatable, Codable {
-    var id = UUID()
-    let isUser: Bool
-    let text: String
-    let date: Date
-}
-
-struct ChatSession: Identifiable, Equatable, Codable {
-    var id = UUID()
-    var date: Date
-    var title: String
-    var messages: [ChatMessage]
-}
-
-@MainActor
-class FreeAIClient: ObservableObject {
-    @Published var sessions: [ChatSession] = []
-    @Published var currentSessionId: UUID?
-    @Published var isLoading = false
-    
-    private let saveKey = "saved_chat_sessions_v7_final"
-    
-    init() {
-        loadHistory()
-        if sessions.isEmpty {
-            createNewSession()
-        } else if currentSessionId == nil {
-            currentSessionId = sessions.first?.id
-        }
-    }
-    
-    var currentSession: ChatSession? {
-        get { sessions.first(where: { $0.id == currentSessionId }) }
-        set {
-            if let index = sessions.firstIndex(where: { $0.id == currentSessionId }), let newValue = newValue {
-                sessions[index] = newValue
-            }
-        }
-    }
-    
-    func createNewSession() {
-        let newSession = ChatSession(date: Date(), title: "New Chat", messages: [])
-        withAnimation {
-            sessions.insert(newSession, at: 0)
-            currentSessionId = newSession.id
-        }
-        saveHistory()
-    }
-    
-    func switchSession(to id: UUID) {
-        currentSessionId = id
-    }
-    
-    func deleteSession(at offsets: IndexSet) {
-        withAnimation {
-            sessions.remove(atOffsets: offsets)
-            if sessions.isEmpty { createNewSession() }
-            else if currentSession == nil { currentSessionId = sessions.first?.id }
-        }
-        saveHistory()
-    }
-    
-    func sendMessage(question: String, context: String) {
-        guard var session = currentSession else { return }
-        
-        if session.messages.isEmpty { session.title = question }
-        
-        let userMsg = ChatMessage(isUser: true, text: question, date: Date())
-        withAnimation { session.messages.append(userMsg) }
-        
-        if let index = sessions.firstIndex(where: { $0.id == session.id }) { sessions[index] = session }
-        saveHistory()
-        
-        guard !context.isEmpty else {
-            let errorMsg = ChatMessage(isUser: false, text: "Please import some text first.", date: Date())
-            withAnimation {
-                if let idx = sessions.firstIndex(where: { $0.id == session.id }) {
-                    sessions[idx].messages.append(errorMsg)
+// MARK: - 1. The Embedded HTML/JS Runner
+// Since we are in one file, we store the HTML as a static string.
+struct EmbeddedResources {
+    static let runnerHTML = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <title>SwiftWasm Runner</title>
+        <style> body { background-color: #1a1a1e; color: white; font-family: monospace; } </style>
+    </head>
+    <body>
+        <h1>Wasm Environment Active</h1>
+        <script>
+            // 1. Hook into console.log to send data back to Swift
+            var originalLog = console.log;
+            console.log = function(message) {
+                if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.consoleLog) {
+                    window.webkit.messageHandlers.consoleLog.postMessage(message.toString());
                 }
+                originalLog(message);
             }
-            return
-        }
-        
-        isLoading = true
-        let safeContext = String(context.prefix(6000))
-        let systemPrompt = "You are a helpful assistant. Answer strictly based on the text below.\n\n--- TEXT START ---\n\(safeContext)\n--- TEXT END ---\n\nQuestion: \(question)"
-        
-        guard let url = URL(string: "https://text.pollinations.ai/") else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
-        let body: [String: Any] = [
-            "messages": [["role": "system", "content": systemPrompt]],
-            "model": "openai"
-        ]
-        
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
-        Task {
-            do {
-                let (data, _) = try await URLSession.shared.data(for: request)
-                if let rawText = String(data: data, encoding: .utf8) {
-                    let cleanText = self.cleanAds(from: rawText)
+
+            // 2. Simulated Wasm Runner (Since we don't have a real backend in this demo)
+            // In a real app, this would accept a Base64 WASM string
+            function simulateWasmExecution(code) {
+                console.log("Initializing Wasm Environment...");
+                
+                // Simulate processing delay
+                setTimeout(() => {
+                    console.log("Analyzing: " + code);
+                    console.log("Compiling to WASM (Simulated)...");
                     
-                    let aiMsg = ChatMessage(isUser: false, text: cleanText, date: Date())
-                    withAnimation {
-                        if let idx = self.sessions.firstIndex(where: { $0.id == session.id }) {
-                            self.sessions[idx].messages.append(aiMsg)
-                        }
-                        self.isLoading = false
-                    }
-                    self.saveHistory()
-                }
-            } catch {
-                let errMsg = ChatMessage(isUser: false, text: "Error: \(error.localizedDescription)", date: Date())
-                if let idx = self.sessions.firstIndex(where: { $0.id == session.id }) {
-                    self.sessions[idx].messages.append(errMsg)
-                }
-                self.isLoading = false
+                    setTimeout(() => {
+                        console.log("Output:");
+                        console.log("Hello from the Embedded Web Engine!");
+                        console.log("Program exited with code 0.");
+                    }, 800);
+                }, 500);
             }
-        }
-    }
-    
-    private func cleanAds(from text: String) -> String {
-        let triggers = [
-            "**Support Pollinations.AI:**",
-            "Powered by Pollinations.AI",
-            "🌸 **Ad** 🌸",
-            "---"
-        ]
-        
-        var clean = text
-        
-        for trigger in triggers {
-            if let range = clean.range(of: trigger) {
-                let dist = clean.distance(from: range.lowerBound, to: clean.endIndex)
-                if dist < 600 {
-                    clean = String(clean[..<range.lowerBound])
-                }
-            }
-        }
-        return clean.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    private func saveHistory() {
-        if let encoded = try? JSONEncoder().encode(sessions) {
-            UserDefaults.standard.set(encoded, forKey: saveKey)
-        }
-    }
-    
-    private func loadHistory() {
-        if let data = UserDefaults.standard.data(forKey: saveKey),
-           let decoded = try? JSONDecoder().decode([ChatSession].self, from: data) {
-            self.sessions = decoded
-        }
-    }
-    
-    func clearCurrentSession() {
-        if let idx = sessions.firstIndex(where: { $0.id == currentSessionId }) {
-            sessions[idx].messages.removeAll()
-            sessions[idx].title = "New Chat"
-            saveHistory()
-        }
-    }
+        </script>
+    </body>
+    </html>
+    """
 }
 
-// MARK: - 2. STREAMING EDGE TTS ENGINE
-
-@MainActor
-class StreamingEdgeTTS: NSObject, ObservableObject, URLSessionWebSocketDelegate {
-    enum State { case stopped, buffering, playing, paused }
-    @Published var state: State = .stopped
-    @Published var errorMessage: String?
+// MARK: - 2. The Engine (WasmRunner)
+// Handles the hidden WebView and JavaScript bridging
+class WasmRunner: NSObject, ObservableObject, WKScriptMessageHandler {
+    var webView: WKWebView!
     
-    let voices = [
-        ("Adrian", "en-US-AndrewMultilingualNeural"),
-        ("Serena", "en-US-AvaMultilingualNeural"),
-        ("Julian", "en-US-BrianMultilingualNeural"),
-        ("Sophie", "en-US-EmmaMultilingualNeural"),
-        ("Max", "en-US-GuyNeural"),
-        ("Luna", "en-US-AriaNeural"),
-        ("Alice", "en-GB-SoniaNeural"),
-        ("Charlie", "en-GB-RyanNeural")
-    ]
-    @Published var selectedVoice = "en-US-AndrewMultilingualNeural"
-    
-    private var webSocket: URLSessionWebSocketTask?
-    
-    private lazy var session: URLSession = {
-        let config = URLSessionConfiguration.default
-        return URLSession(configuration: config, delegate: self, delegateQueue: OperationQueue())
-    }()
-    
-    private var player: AVQueuePlayer?
-    private var bufferData = Data()
-    private let chunkThreshold = 64 * 1024
-    
-    private let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "E, d MMM yyyy HH:mm:ss 'GMT'"
-        f.timeZone = TimeZone(abbreviation: "GMT")
-        f.locale = Locale(identifier: "en_US")
-        return f
-    }()
+    // Published property so SwiftUI updates automatically when logs arrive
+    @Published var logs: String = "Ready to compile...\n"
+    @Published var isRunning: Bool = false
     
     override init() {
         super.init()
-        setupAudioSession()
+        setupWebView()
     }
     
-    private func setupAudioSession() {
-        do {
-            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
-            try AVAudioSession.sharedInstance().setActive(true)
-        } catch { print("Audio Session Error: \(error)") }
-    }
-    
-    func stop() {
-        webSocket?.cancel(with: .normalClosure, reason: nil)
-        player?.pause()
-        player?.removeAllItems()
-        bufferData.removeAll()
-        withAnimation { self.state = .stopped }
-    }
-    
-    func play(text: String) {
-        stop()
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        withAnimation { self.state = .buffering; self.errorMessage = nil }
-        player = AVQueuePlayer()
-        connectAndSpeak(text: text)
-    }
-    
-    func pauseResume() {
-        guard let player = player else { return }
-        if player.timeControlStatus == .playing { player.pause(); state = .paused }
-        else if player.currentItem != nil { player.play(); state = .playing }
-    }
-    
-    func seek(by seconds: Double) {
-        guard let player = player, let currentItem = player.currentItem else { return }
-        let newTime = CMTimeAdd(currentItem.currentTime(), CMTime(seconds: seconds, preferredTimescale: 600))
-        player.seek(to: newTime)
-    }
-    
-    private func connectAndSpeak(text: String) {
-        let urlString = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4"
-        guard let url = URL(string: urlString) else { return }
+    private func setupWebView() {
+        let config = WKWebViewConfiguration()
+        let userContentController = WKUserContentController()
         
-        webSocket = session.webSocketTask(with: url)
-        webSocket?.resume()
-        sendConfig()
-        sendSSML(text: text, voice: self.selectedVoice)
-        listen()
+        // Add the bridge: JS 'window.webkit.messageHandlers.consoleLog' -> Swift
+        userContentController.add(self, name: "consoleLog")
+        config.userContentController = userContentController
+        
+        webView = WKWebView(frame: .zero, configuration: config)
+        
+        // Load the embedded HTML string
+        webView.loadHTMLString(EmbeddedResources.runnerHTML, baseURL: nil)
     }
     
-    private func listen() {
-        webSocket?.receive { [weak self] result in
-            guard let self = self else { return }
-            
-            Task {
-                switch result {
-                case .success(let message):
-                    switch message {
-                    case .string(let text): if text.contains("turn.end") { self.processAudioChunk(force: true) } else { self.listen() }
-                    case .data(let data): self.handleBinaryData(data); self.listen()
-                    @unknown default: break
-                    }
-                case .failure(_):
-                    self.errorMessage = "Connection interrupted"
+    // Receive messages from JavaScript
+    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "consoleLog", let body = message.body as? String {
+            // Update UI on Main Thread
+            DispatchQueue.main.async {
+                self.logs += "> \(body)\n"
+            }
+        }
+    }
+    
+    // Trigger execution
+    func run(code: String) {
+        self.isRunning = true
+        self.logs = "" // Clear previous logs
+        
+        // Escape the code string for JS
+        let sanitizedCode = code.replacingOccurrences(of: "\"", with: "\\\"").replacingOccurrences(of: "\n", with: "\\n")
+        
+        // Call the JS function defined in the HTML
+        let js = "simulateWasmExecution(\"\(sanitizedCode)\")"
+        
+        webView.evaluateJavaScript(js) { _, error in
+            if let error = error {
+                DispatchQueue.main.async {
+                    self.logs += "Error: \(error.localizedDescription)\n"
                 }
             }
-        }
-    }
-    
-    private func handleBinaryData(_ data: Data) {
-        guard data.count > 2 else { return }
-        let headerLen = (Int(data[0]) << 8) | Int(data[1])
-        if data.count > headerLen + 2 {
-            bufferData.append(data.subdata(in: (headerLen + 2)..<data.count))
-            if bufferData.count >= chunkThreshold { processAudioChunk(force: false) }
-        }
-    }
-    
-    private func processAudioChunk(force: Bool) {
-        guard !bufferData.isEmpty else { return }
-        let tempFile = FileManager.default.temporaryDirectory.appendingPathComponent("chunk_\(UUID().uuidString).mp3")
-        do {
-            try bufferData.write(to: tempFile)
-            bufferData.removeAll()
-            let item = AVPlayerItem(url: tempFile)
-            
-            self.player?.insert(item, after: nil)
-            if self.state == .buffering { self.player?.play(); withAnimation { self.state = .playing } }
-            
-        } catch { print("Write Error: \(error)") }
-    }
-    
-    private func sendConfig() {
-        let msg = buildMessage(path: "speech.config", type: "application/json; charset=utf-8", body: """
-        {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}
-        """)
-        webSocket?.send(.string(msg)) { _ in }
-    }
-    
-    private func sendSSML(text: String, voice: String) {
-        let escaped = text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;").replacingOccurrences(of: "'", with: "&apos;")
-        let ssml = "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='\(voice)'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>\(escaped)</prosody></voice></speak>"
-        webSocket?.send(.string(buildMessage(path: "ssml", type: "application/ssml+xml", body: ssml))) { _ in }
-    }
-    
-    private func buildMessage(path: String, type: String, body: String) -> String {
-        let ts = dateFormatter.string(from: Date())
-        let reqId = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        return "X-Timestamp:\(ts)\r\nContent-Type:\(type)\r\nX-RequestId:\(reqId)\r\nPath:\(path)\r\n\r\n\(body)"
-    }
-    
-    nonisolated func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
-    }
-    
-    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if let err = error {
-            Task { @MainActor in
-                self.errorMessage = "Network Error: \(err.localizedDescription)"
+            // Reset running state after a delay (simulating end of process)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.isRunning = false
             }
         }
     }
 }
 
-// MARK: - 3. CONTENT EXTRACTOR
-
-struct ContentExtractor {
-    static func extractFromPDF(url: URL) -> String {
-        guard let doc = PDFDocument(url: url) else { return "" }
-        var txt = ""
-        for i in 0..<doc.pageCount { if let p = doc.page(at: i)?.string { txt += p + "\n" } }
-        return txt
-    }
+// MARK: - 3. The Premium UI (ContentView)
+struct ContentView: View {
+    @StateObject private var runner = WasmRunner()
+    @State private var codeText: String = """
+    print("Hello World")
     
-    static func extractFromWeb(url: URL) async -> String {
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            return try await MainActor.run {
-                let opts: [NSAttributedString.DocumentReadingOptionKey: Any] = [
-                    .documentType: NSAttributedString.DocumentType.html,
-                    .characterEncoding: String.Encoding.utf8.rawValue
-                ]
-                let attr = try NSAttributedString(data: data, options: opts, documentAttributes: nil)
-                return attr.string
-            }
-        } catch {
-            return "Failed to parse text: \(error.localizedDescription)"
-        }
-    }
-}
-
-// MARK: - 4. MAIN VIEW & UI
-
-@main
-struct ProReaderApp: App {
-    init() {
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor(red: 0.08, green: 0.08, blue: 0.1, alpha: 1.0)
-        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
-        appearance.shadowColor = .clear
-        
-        UINavigationBar.appearance().standardAppearance = appearance
-        UINavigationBar.appearance().compactAppearance = appearance
-        UINavigationBar.appearance().scrollEdgeAppearance = appearance
-    }
+    // This is a premium Swift Editor
+    // Running this will trigger the JS Bridge
+    """
     
-    var body: some Scene { WindowGroup { ProReaderView().preferredColorScheme(.dark) } }
-}
-
-struct ProReaderView: View {
-    @StateObject private var tts = StreamingEdgeTTS()
-    @StateObject private var aiClient = FreeAIClient()
-    
-    @State private var textContent: String = "Welcome to Pro Reader.\n\nImport a PDF or Web Article.\nThen tap the AI icon to ask questions about it."
-    @State private var showPDFImporter = false
-    @State private var showWebInput = false
-    @State private var showAIChat = false
-    @State private var webURLString = ""
-    @FocusState private var isTextFocused: Bool
-    
-    let bgColor = Color(red: 0.08, green: 0.08, blue: 0.1)
-    let cardColor = Color(red: 0.12, green: 0.12, blue: 0.14)
-    let panelColor = Color(red: 0.14, green: 0.14, blue: 0.16)
-    let accentGradient = LinearGradient(colors: [Color.blue, Color.purple], startPoint: .topLeading, endPoint: .bottomTrailing)
+    @State private var showConsole: Bool = true
     
     var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-                // 1. BACKGROUND
-                bgColor.ignoresSafeArea()
-                
-                // 2. TEXT EDITOR
-                VStack(spacing: 20) {
-                    TextEditor(text: $textContent)
-                        .font(.system(.body, design: .serif))
-                        .lineSpacing(8)
-                        .scrollContentBackground(.hidden)
-                        .foregroundColor(.white.opacity(0.9))
-                        .focused($isTextFocused)
-                        .padding()
-                        .background(cardColor)
-                        .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-                        .shadow(color: Color.black.opacity(0.2), radius: 10, y: 5)
-                        .padding(.horizontal)
-                        .padding(.bottom, 130) // Space for player + AI tab height
-                }.padding(.top)
-                
-                // 3. AI DRAWER (Layer 2 - Behind Player)
-                if showAIChat {
-                    Color.black.opacity(0.3).ignoresSafeArea()
-                        .onTapGesture { withAnimation { showAIChat = false } }
-                        .zIndex(1)
-                    
-                    AIOverlayPanel(
-                        client: aiClient,
-                        contextText: textContent,
-                        showAIChat: $showAIChat,
-                        panelColor: panelColor
-                    )
-                    .transition(.move(edge: .bottom))
-                    .zIndex(2) // Sits visually behind layer 3
-                }
-                
-                // 4. PLAYER PANEL (Layer 3 - On Top)
-                ProPlayerPanel(
-                    tts: tts,
-                    textContent: $textContent,
-                    showAIChat: $showAIChat,
-                    showWebInput: $showWebInput,
-                    showPDFImporter: $showPDFImporter,
-                    accentGradient: accentGradient,
-                    panelColor: panelColor
-                )
-                .zIndex(3) // Topmost Z Index
-                
-            }
-            .navigationTitle("Pro Reader")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItemGroup(placement: .keyboard) { Spacer(); Button("Done") { isTextFocused = false } }
-            }
-            .alert("Web URL", isPresented: $showWebInput) {
-                TextField("https://...", text: $webURLString).keyboardType(.URL)
-                Button("Load") {
-                    guard let url = URL(string: webURLString) else { return }
-                    Task {
-                        let extracted = await ContentExtractor.extractFromWeb(url: url)
-                        await MainActor.run { textContent = extracted }
-                    }
-                }
-                Button("Cancel", role: .cancel) { }
-            }
-            .fileImporter(isPresented: $showPDFImporter, allowedContentTypes: [.pdf]) { result in
-                if case .success(let url) = result, url.startAccessingSecurityScopedResource() {
-                    textContent = ContentExtractor.extractFromPDF(url: url)
-                    url.stopAccessingSecurityScopedResource()
-                }
-            }
-        }
-    }
-}
-
-// MARK: - 5. UI COMPONENTS
-
-struct ProPlayerPanel: View {
-    @ObservedObject var tts: StreamingEdgeTTS
-    @Binding var textContent: String
-    @Binding var showAIChat: Bool
-    @Binding var showWebInput: Bool
-    @Binding var showPDFImporter: Bool
-    var accentGradient: LinearGradient
-    var panelColor: Color
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            // --- CONTROL ROW ---
-            HStack(spacing: 12) {
-                Spacer()
-                
-                // 1. LEFT: AI BUTTON
-                Button {
-                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
-                        showAIChat.toggle()
-                    }
-                } label: {
-                    ZStack {
-                        // Background matches inactive state
-                        Circle().fill(Color.white.opacity(0.1)).frame(width: 44, height: 44)
-                        
-                        // Icon changes based on state
-                        if showAIChat {
-                            Image(systemName: "chevron.down")
-                                .font(.system(size: 18, weight: .bold))
-                                .foregroundColor(.white)
-                        } else {
-                            Text("AI")
-                                .font(.system(size: 16, weight: .heavy, design: .rounded))
-                                .foregroundColor(.white)
-                        }
-                    }
-                }
-                
-                // 2. CENTER: VOICE NAME
-                Menu {
-                    ForEach(tts.voices, id: \.1) { name, id in
-                        Button { tts.selectedVoice = id; if tts.state == .playing { tts.play(text: textContent) } }
-                        label: { HStack { Text(name); if tts.selectedVoice == id { Image(systemName: "checkmark") } } }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(tts.voices.first(where: { $0.1 == tts.selectedVoice })?.0 ?? "Voice")
-                            .font(.subheadline.weight(.medium))
-                            .lineLimit(1)
-                        // CHEVRON REMOVED HERE
-                    }
-                    .foregroundColor(.white.opacity(0.9))
-                    .padding(.horizontal, 20)
-                    .frame(height: 44)
-                    .background(Capsule().fill(Color.white.opacity(0.05)))
-                }
-                
-                // 3. RIGHT: ADD/MENU BUTTON
-                Menu {
-                    Button(action: { showWebInput = true }) { Label("Web Article", systemImage: "safari") }
-                    Button(action: { showPDFImporter = true }) { Label("PDF Document", systemImage: "doc.text") }
-                    Button(action: { textContent = UIPasteboard.general.string ?? textContent }) { Label("Paste", systemImage: "doc.on.clipboard") }
-                    Divider()
-                    Button(role: .destructive, action: { textContent = "" }) { Label("Clear Text", systemImage: "trash") }
-                } label: {
-                    Image(systemName: "ellipsis")
-                        .font(.system(size: 18, weight: .semibold))
-                        .rotationEffect(.degrees(90))
+        NavigationSplitView {
+            // Sidebar (File Manager)
+            List {
+                Section(header: Text("PROJECT")) {
+                    Label("main.swift", systemImage: "swift")
+                        .listRowBackground(Color.white.opacity(0.1))
                         .foregroundColor(.white)
-                        .frame(width: 44, height: 44)
-                        .background(Circle().fill(Color.white.opacity(0.1)))
+                    Label("Package.swift", systemImage: "shippingbox")
+                        .listRowBackground(Color.white.opacity(0.1))
+                        .foregroundColor(.gray)
                 }
                 
-                Spacer()
-            }
-            .padding(.horizontal, 24)
-            
-            // --- PLAYER CONTROLS ---
-            HStack(spacing: 40) {
-                Button { haptic(); tts.seek(by: -10) } label: { Image(systemName: "gobackward.10").font(.title2) }.disabled(tts.state == .stopped || tts.state == .buffering)
-                Button {
-                    haptic(); if tts.state == .stopped { tts.play(text: textContent) } else { tts.pauseResume() }
-                } label: {
-                    ZStack {
-                        Circle().fill(accentGradient).frame(width: 64, height: 64).shadow(color: .blue.opacity(0.3), radius: 10, y: 5)
-                        if tts.state == .buffering { ProgressView().tint(.white) }
-                        else { Image(systemName: tts.state == .playing ? "pause.fill" : "play.fill").font(.title.bold()).foregroundColor(.white) }
-                    }
-                }
-                Button { haptic(); tts.seek(by: 10) } label: { Image(systemName: "goforward.10").font(.title2) }.disabled(tts.state == .stopped || tts.state == .buffering)
-            }.foregroundColor(.white)
-        }
-        .padding(.top, 24)
-        .padding(.bottom, 10).frame(maxWidth: .infinity)
-        .background(
-            UnevenRoundedRectangle(topLeadingRadius: 32, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 32)
-                .fill(panelColor).ignoresSafeArea().shadow(color: .black.opacity(0.4), radius: 20, y: -5)
-        )
-    }
-    func haptic() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-}
-
-// MARK: - 6. AI DRAWER (BEHIND PLAYER)
-
-struct AIOverlayPanel: View {
-    @ObservedObject var client: FreeAIClient
-    var contextText: String
-    @Binding var showAIChat: Bool
-    var panelColor: Color
-    
-    @State private var inputText = ""
-    @State private var showHistory = false
-    
-    var body: some View {
-        VStack(spacing: 0) {
-            
-            // --- HANDLE & HEADER ---
-            VStack(spacing: 8) {
-                Capsule()
-                    .fill(Color.white.opacity(0.2))
-                    .frame(width: 40, height: 5)
-                    .padding(.top, 12)
-                    .onTapGesture { withAnimation { showAIChat = false } }
-                
-                HStack {
-                    Button { client.createNewSession() } label: {
-                        Image(systemName: "square.and.pencil").foregroundColor(.white.opacity(0.7))
-                    }
-                    Spacer()
-                    Text(client.currentSession?.title ?? "AI Assistant")
-                        .font(.headline)
-                        .foregroundColor(.white.opacity(0.9))
-                    Spacer()
-                    Button { showHistory = true } label: {
-                        Image(systemName: "clock").foregroundColor(.white.opacity(0.7))
-                    }
-                }
-                .padding(.horizontal, 24)
-                .padding(.bottom, 10)
-            }
-            .background(panelColor)
-            .gesture(DragGesture().onEnded { val in
-                if val.translation.height > 50 { withAnimation { showAIChat = false } }
-            })
-            
-            // --- CHAT CONTENT ---
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        if let session = client.currentSession {
-                            if session.messages.isEmpty {
-                                VStack(spacing: 20) {
-                                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                                        .font(.system(size: 40))
-                                        .foregroundColor(.gray.opacity(0.4))
-                                    Text("Ask about the text").font(.subheadline).foregroundColor(.gray)
-                                }
-                                .frame(maxWidth: .infinity).padding(.top, 40)
-                            } else {
-                                ForEach(session.messages) { msg in ChatBubble(message: msg) }
-                            }
-                        }
-                        if client.isLoading {
-                            HStack { Spacer(); ProgressView().tint(.white); Spacer() }.padding()
-                        }
-                        Spacer().frame(height: 10)
-                    }
-                    .padding()
-                }
-                .onChange(of: client.currentSession?.messages.count) { _, _ in
-                    if let last = client.currentSession?.messages.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
-                }
-            }
-            .background(panelColor)
-            
-            // --- INPUT AREA ---
-            HStack(spacing: 10) {
-                TextField("Ask...", text: $inputText)
-                    .padding(12)
-                    .background(Color(white: 0.2))
-                    .cornerRadius(20)
-                    .foregroundColor(.white)
-                    .submitLabel(.send)
-                    .onSubmit { sendMessage() }
-                
-                Button(action: sendMessage) {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 32))
-                        .symbolRenderingMode(.hierarchical)
+                Section(header: Text("RESOURCES")) {
+                    Label("Assets.xcassets", systemImage: "folder.fill")
                         .foregroundColor(.blue)
                 }
-                .disabled(client.isLoading || inputText.isEmpty)
             }
-            .padding(.horizontal)
-            .padding(.top, 10)
-            .padding(.bottom, 185) // Kept at 185 (Goldilocks zone)
-            .background(panelColor)
-        }
-        .frame(maxHeight: UIScreen.main.bounds.height * 0.85)
-        .background(panelColor)
-        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 32, bottomLeadingRadius: 0, bottomTrailingRadius: 0, topTrailingRadius: 32))
-        .shadow(color: .black.opacity(0.5), radius: 20, y: -5)
-        .sheet(isPresented: $showHistory) { HistoryView(client: client) }
-    }
-    
-    func sendMessage() {
-        guard !inputText.isEmpty else { return }
-        let q = inputText; inputText = ""
-        client.sendMessage(question: q, context: contextText)
-    }
-}
-
-// MARK: - 7. HISTORY UI & BUBBLES
-
-struct HistoryView: View {
-    @ObservedObject var client: FreeAIClient
-    @Environment(\.dismiss) var dismiss
-    
-    var body: some View {
-        NavigationStack {
-            List {
-                ForEach(client.sessions) { session in
-                    Button {
-                        client.switchSession(to: session.id)
-                        dismiss()
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(session.title.isEmpty ? "New Chat" : session.title)
-                                    .font(.headline).foregroundColor(.white).lineLimit(1)
-                                Text(session.date.formatted(date: .abbreviated, time: .shortened))
-                                    .font(.caption).foregroundColor(.gray)
-                            }
-                            Spacer()
-                            if session.id == client.currentSessionId {
-                                Image(systemName: "checkmark.circle.fill").font(.title3).foregroundColor(.blue)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .listRowBackground(Color(white: 0.12))
-                    .listRowSeparatorTint(Color.white.opacity(0.2))
-                }
-                .onDelete(perform: client.deleteSession)
-            }
+            .navigationTitle("Explorer")
+            .listStyle(.sidebar)
+            .background(Color(red: 0.05, green: 0.05, blue: 0.07)) // Deep dark sidebar
             .scrollContentBackground(.hidden)
-            .background(Color(red: 0.08, green: 0.08, blue: 0.1).ignoresSafeArea())
-            .navigationTitle("History")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            
+        } detail: {
+            ZStack(alignment: .bottom) {
+                // Background
+                Color(red: 0.1, green: 0.1, blue: 0.12).ignoresSafeArea()
+                
+                // Editor Area
+                VStack(spacing: 0) {
+                    // Toolbar
+                    EditorHeaderView(runAction: {
+                        runner.run(code: codeText)
+                    })
+                    
+                    // Code Editor
+                    TextEditor(text: $codeText)
+                        .font(.system(.body, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                        .background(Color.clear)
+                        .foregroundColor(.white)
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .padding(.bottom, showConsole ? 200 : 0) // Make room for console
+                
+                // Floating Glass Console
+                if showConsole {
+                    ConsoleView(output: runner.logs, isRunning: runner.isRunning)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                        .padding()
+                        .frame(height: 250)
+                }
+            }
         }
         .preferredColorScheme(.dark)
     }
 }
 
-struct ChatBubble: View {
-    let message: ChatMessage
+// MARK: - 4. Subcomponents (Design Elements)
+
+struct EditorHeaderView: View {
+    var runAction: () -> Void
+    
     var body: some View {
-        HStack(alignment: .bottom) {
-            if message.isUser { Spacer() }
-            VStack(alignment: message.isUser ? .trailing : .leading) {
-                Text(message.text)
-                    .padding(12)
-                    .background(message.isUser ? Color.blue : Color(white: 0.22))
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .frame(maxWidth: UIScreen.main.bounds.width * 0.70, alignment: message.isUser ? .trailing : .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled) // ENABLED WORD-BY-WORD SELECTION
-                Text(message.date.formatted(.dateTime.hour().minute()))
-                    .font(.caption2).foregroundColor(.gray).padding(.horizontal, 4)
+        HStack {
+            Image(systemName: "chevron.right")
+                .foregroundColor(.gray)
+            Text("main.swift")
+                .font(.caption)
+                .fontWeight(.bold)
+                .foregroundColor(.gray)
+            
+            Spacer()
+            
+            Button(action: runAction) {
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill")
+                        .font(.caption)
+                    Text("Run")
+                        .font(.caption.bold())
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(
+                    LinearGradient(colors: [Color.blue.opacity(0.8), Color.blue.opacity(0.5)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                )
+                .clipShape(Capsule())
+                .shadow(color: Color.blue.opacity(0.3), radius: 5, x: 0, y: 2)
             }
-            if !message.isUser { Spacer() }
         }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(Color(red: 0.08, green: 0.08, blue: 0.1))
+        .overlay(
+            Rectangle().frame(height: 1).foregroundColor(Color.white.opacity(0.05)),
+            alignment: .bottom
+        )
+    }
+}
+
+struct ConsoleView: View {
+    var output: String
+    var isRunning: Bool
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Console Toolbar
+            HStack {
+                Text("TERMINAL")
+                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                    .foregroundColor(.gray)
+                Spacer()
+                if isRunning {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.white)
+                }
+            }
+            .padding(12)
+            .background(Color.black.opacity(0.2))
+            
+            Divider().background(Color.white.opacity(0.1))
+            
+            // Console Output
+            ScrollView {
+                Text(output)
+                    .font(.custom("Menlo", size: 12))
+                    .foregroundColor(.green)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(12)
+            }
+        }
+        // Glassmorphism Styles
+        .background(.ultraThinMaterial)
+        .cornerRadius(16)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+        )
+        .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
     }
 }
