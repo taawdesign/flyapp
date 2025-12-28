@@ -1,8 +1,8 @@
-name: import
+name: MAIN
 options:
   bundleIdPrefix: neo.uniwalls
 targets:
-  import:
+  MAIN:
     type: application
     platform: iOS
     deploymentTarget: 17.0
