@@ -20,25 +20,25 @@ jobs:
       - name: Build Archive
         run: |
           xcodebuild archive \
-            -project MARK.xcodeproj \
-            -scheme MARK \
+            -project A.xcodeproj \
+            -scheme A \
             -destination "generic/platform=iOS" \
-            -archivePath build/MARK.xcarchive \
+            -archivePath build/A.xcarchive \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
             
-      - name: Export IPA
+      - name: Export IPA (Unsigned)
         run: |
-          mkdir -p build/Payload
-          mv build/MARK.xcarchive/Products/Applications/MARK.app build/Payload/
-          cd build
-          zip -r MARK.ipa Payload
+          mkdir -p Payload
+          cp -r build/A.xcarchive/Products/Applications/A.app Payload/
+          zip -r A.ipa Payload
           
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: build-${{ github.run_id }}
-          files: build/MARK.ipa
+          files: A.ipa
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
