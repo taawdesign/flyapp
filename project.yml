@@ -1,10 +1,10 @@
-name: MyApp
+name: Me
 options:
   bundleIdPrefix: neo.uniwalls
   deploymentTarget:
     iOS: "17.0"
 targets:
-  MyApp:
+  Me:
     type: application
     platform: iOS
     deploymentTarget: "17.0"
