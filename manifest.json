@@ -1,0 +1,19 @@
+{
+    "name": "Fly",
+    "short_name": "Fly",
+    "description": "Sideloading made easy!",
+    "start_url": "/fly/",
+    "scope": "/fly/",
+    "display": "standalone",
+    "background_color": "#0f0f2d",
+    "theme_color": "#0f0f2d",
+    "orientation": "portrait",
+    "icons": [
+        {
+            "src": "fly.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any maskable"
+        }
+    ]
+}
