@@ -650,37 +650,9 @@ body::-webkit-scrollbar {
     color: var(--primary);
 }
 
-/* TAAW Branding with flipped V/V effect */
-.footer-brand {
-    display: flex;
-    align-items: center;
-    gap: 1px;
-}
-
-.brand-t,
-.brand-w {
-    font-weight: 600;
-}
-
-.brand-aa {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: center;
-    font-weight: 600;
-}
-
-.brand-aa::before,
-.brand-aa::after {
-    content: "V";
-    display: block;
-    line-height: 0.8;
-}
-
-.brand-aa::before {
-    transform: scaleY(-1);
-}
-
-.brand-aa::after {
+/* Flip V letters */
+.flip-v {
+    display: inline-block;
     transform: scaleY(-1);
 }
 
