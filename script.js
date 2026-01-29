@@ -37,7 +37,7 @@ const FILES = {
     'Fly.ipa': {
         path: `${GITHUB_PAGES_URL}/manifest.plist`,
         type: 'ota',
-        message: 'Installing Fly App... A prompt will appear asking to install. Tap "Install" to continue.'
+        message: 'Installing Fly App... After installation, go to Settings → General → VPN & Device Management to trust the profile.'
     }
 };
 
