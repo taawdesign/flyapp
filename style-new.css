@@ -628,15 +628,21 @@ body::-webkit-scrollbar {
 }
 
 /* ============================================
-   Social Links
+   Social Links and Footer Layout
    ============================================ */
 
-.social-container {
+.social-footer-wrapper {
     display: flex;
     justify-content: center;
+    align-items: center;
     gap: var(--spacing-md);
     margin: var(--spacing-md) 0;
     padding: var(--spacing-sm) 0;
+}
+
+.social-wrapper {
+    display: flex;
+    justify-content: center;
 }
 
 .social-link {
@@ -704,6 +710,7 @@ body::-webkit-scrollbar {
     width: fit-content;
     margin-left: auto;
     margin-right: auto;
+    flex-shrink: 0;
 }
 
 .footer-content {
