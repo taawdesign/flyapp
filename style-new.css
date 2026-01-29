@@ -635,7 +635,7 @@ body::-webkit-scrollbar {
     display: flex;
     justify-content: center;
     align-items: center;
-    gap: var(--spacing-md);
+    gap: var(--spacing-xs);
     margin: var(--spacing-md) 0;
     padding: var(--spacing-sm) 0;
 }
@@ -643,6 +643,7 @@ body::-webkit-scrollbar {
 .social-wrapper {
     display: flex;
     justify-content: center;
+    align-items: center;
 }
 
 .social-link {
@@ -704,12 +705,10 @@ body::-webkit-scrollbar {
    ============================================ */
 
 .footer {
-    margin-top: var(--spacing-lg);
+    margin: 0;
     padding: var(--spacing-sm) var(--spacing-md);
     animation: fadeInUp 0.8s ease-out 0.6s backwards;
     width: fit-content;
-    margin-left: auto;
-    margin-right: auto;
     flex-shrink: 0;
 }
 
