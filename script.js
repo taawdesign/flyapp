@@ -70,10 +70,9 @@ async function fetchLatestVersion() {
         const data = await response.json();
         const version = data.tag_name || data.name || '1.8';
         
-        // Remove 'v' prefix if present and update the version text
-        const cleanVersion = version.replace(/^v/i, '');
+        // Update the version text with the release tag directly
         if (elements.versionText) {
-            elements.versionText.textContent = `ver ${cleanVersion}`;
+            elements.versionText.textContent = version;
         }
     } catch (error) {
         console.error('Error fetching version:', error);
