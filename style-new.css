@@ -299,6 +299,11 @@ body::-webkit-scrollbar {
     color: var(--text-secondary);
     font-weight: 400;
     letter-spacing: 0.02em;
+    margin: 0;
+}
+
+.subtitle + .subtitle {
+    margin-top: var(--spacing-xs);
 }
 
 @keyframes pulse {
