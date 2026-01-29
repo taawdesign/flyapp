@@ -470,6 +470,7 @@ body::-webkit-scrollbar {
 .step-content {
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--spacing-md);
     padding: var(--spacing-md);
     background: rgba(255, 255, 255, 0.03);
@@ -826,7 +827,8 @@ body::-webkit-scrollbar {
 
     .step-content {
         flex-direction: column;
-        align-items: stretch;
+        align-items: center;
+        justify-content: center;
     }
 
     .download-btn {
