@@ -20,7 +20,8 @@ const elements = {
     lineProgress: document.getElementById('line-progress'),
     noteLineProgress: document.getElementById('note-line-progress'),
     modal: document.getElementById('successModal'),
-    modalMessage: document.getElementById('modalMessage')
+    modalMessage: document.getElementById('modalMessage'),
+    versionText: document.getElementById('version-text')
 };
 
 // GitHub configuration
@@ -46,6 +47,9 @@ const FILES = {
  * Initialize the webapp
  */
 function init() {
+    // Fetch latest version from GitHub releases
+    fetchLatestVersion();
+    
     // Add subtle parallax effect on mouse move (desktop)
     if (window.matchMedia('(pointer: fine)').matches) {
         initParallax();
@@ -53,6 +57,28 @@ function init() {
 
     // Add touch feedback for mobile
     addTouchFeedback();
+}
+
+/**
+ * Fetch latest release version from GitHub API
+ */
+async function fetchLatestVersion() {
+    try {
+        const response = await fetch(`https://api.github.com/repos/${GITHUB_USERNAME}/${REPO_NAME}/releases/latest`);
+        if (!response.ok) throw new Error('Failed to fetch version');
+        
+        const data = await response.json();
+        const version = data.tag_name || data.name || '1.8';
+        
+        // Remove 'v' prefix if present and update the version text
+        const cleanVersion = version.replace(/^v/i, '');
+        if (elements.versionText) {
+            elements.versionText.textContent = `ver ${cleanVersion}`;
+        }
+    } catch (error) {
+        console.error('Error fetching version:', error);
+        // Keep the default version if fetch fails
+    }
 }
 
 /**
