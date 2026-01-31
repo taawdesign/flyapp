@@ -973,3 +973,16 @@ body::-webkit-scrollbar {
         background: rgba(30, 30, 50, 0.85);
     }
 }
+/* ============================================
+   Adjustments for Hidden Note Section
+   ============================================ */
+
+/* Reduce spacing after steps container */
+.steps-container {
+    margin-bottom: 10px;
+}
+
+/* Move social footer closer to steps */
+.social-footer-wrapper {
+    margin-top: 5px !important;
+}
